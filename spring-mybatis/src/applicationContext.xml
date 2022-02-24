@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:aop="http://www.springframework.org/schema/aop"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+        				   http://www.springframework.org/schema/beans/spring-beans.xsd
+        				   http://www.springframework.org/schema/aop
+                           http://www.springframework.org/schema/aop/spring-aop.xsd
+                           http://www.springframework.org/schema/tx
+                           http://www.springframework.org/schema/tx/spring-tx.xsd
+                           http://www.springframework.org/schema/context
+                           http://www.springframework.org/schema/context/spring-context.xsd" 
+    default-autowire="byName"> <!-- 设置自动注入，特别注意，这里的自动注入只对bean标签下的类有用，
+    							当使用注解来定义bean时无法自动注入，但是可以用@Resource @Autowired-->
+    <!-- Spring对.properties文件的支持 -->
+    <context:property-placeholder location="classpath:db.properties"/>
+    <context:component-scan base-package="com.fudian.service"></context:component-scan>
+    <!-- 获取数据源 -->
+    <!-- 以下方式不够灵活 -->			   
+<!--     <bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource"> -->
+<!--     	<property name="driverClassName" value="com.mysql.jdbc.Driver"></property> -->
+<!--     	<property name="url" value="jdbc:mysql://localhost:3306/mysql"></property> -->
+<!--     	<property name="username" value="root"></property> -->
+<!--     	<property name="password" value="root"></property> -->
+<!--     </bean> -->
+    <bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
+    	<property name="driverClassName" value="${jdbc.driverClassName}"></property>
+    	<property name="url" value="${jdbc.url}"></property>
+    	<property name="username" value="${jdbc.username}"></property>
+    	<property name="password" value="${jdbc.password}"></property>
+    </bean>
+    <bean id="factory" class="org.mybatis.spring.SqlSessionFactoryBean">
+<!--  有了自动注入，可以不配置   	<property name="dataSource" ref="dataSource"></property> -->
+    	<property name="typeAliasesPackage" value="com.fudian.pojo"></property>
+    </bean>
+    <bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+        <!-- 为该包下面所有的Mapper接口都生成了实现类bean，默认首字母小写 -->
+    	<property name="basePackage" value="com.fudian.mapper"></property>
+        <!--         <property name="sqlSessionFactory" ref="factory"></property> -->
+        <!-- 这么写是因为DI时会去创建dataSource对象，而加载配置文件方式来不及加载${}，会导致对象创建失败 -->
+        <property name="sqlSessionFactoryBeanName" value="factory"></property> 
+    </bean>
+
+    <bean id="usersService" class="com.fudian.service.impl.UsersServiceImpl">
+    	<!-- 这种方式的DI需要通过get/set方法 -->
+<!--     	<property name="usersMapper" ref="usersMapper"></property> -->
+    </bean>
+    
+    <context:component-scan base-package="com.fudian.advice"></context:component-scan>
+    <!-- 配置动态代理默认使用什么方式，true代表使用cglib而不是JDK动态代理，一般用在使用注解@Aspect配置aop时 -->
+    <aop:aspectj-autoproxy proxy-target-class="true"></aop:aspectj-autoproxy>
+    
+    
+    <!-- schema-based方式实现aop -->
+    <bean id="mybefore" class="com.fudian.advice.MyBeforeAdvice"></bean>
+    <bean id="myafter" class="com.fudian.advice.MyAfterAdvice"></bean>
+    <bean id="myarround" class="com.fudian.advice.MyArround"></bean>
+    
+    <bean id="demo" class="com.fudian.test.Demo"></bean>
+    
+    <aop:config>
+    	<aop:pointcut expression="execution(* com.fudian.test.Demo.demo01(..))" id="mypointcut"/>
+    	<aop:advisor advice-ref="mybefore" pointcut-ref="mypointcut"/>
+    	<aop:advisor advice-ref="myafter" pointcut-ref="mypointcut"/>
+    	<aop:advisor advice-ref="myarround" pointcut-ref="mypointcut"/>
+    </aop:config>
+    
+    <!-- AspectJ方式实现aop-->
+    <bean id="mythrow" class="com.fudian.advice.MyThrowAdvice"></bean>
+    <bean id="myadvice" class="com.fudian.advice.MyAdvice"></bean>
+    <aop:config>
+    	<aop:aspect ref="mythrow">
+    		<aop:pointcut expression="execution(* com.fudian.test.Demo.*(..))" id="mypointcut2"/>
+    		<aop:after-throwing method="myexception" pointcut-ref="mypointcut2" throwing="e1"/>
+    	</aop:aspect>
+    	<aop:aspect ref="myadvice">
+    		<aop:pointcut expression="execution(* com.fudian.test.Demo.demo03(..))" id="mypointcut1"/>
+    		<!-- 这里的配置顺序决定后置通知的执行顺序，注意after-returning只在方法成功执行之后执行，after都要执行 -->
+    		<aop:after-returning pointcut-ref="mypointcut1" method="myafterreturn"/>
+    		<aop:after method="myafter" pointcut-ref="mypointcut1"/>
+    		<aop:around method="myarround" pointcut-ref="mypointcut1"/>
+    		
+    		<aop:pointcut expression="execution(* com.fudian.test.Demo.demo04(String)) and args(name1)" id="mypointcut3"/>
+    		<aop:before method="mybefore" pointcut-ref="mypointcut3" arg-names="name1"/>
+    	</aop:aspect>
+    </aop:config>
+    
+    <!-- 下面演示声明式事务 -->
+    <bean id="txManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager"></bean>
+    <tx:advice id="txAdvice" transaction-manager="txManager">
+    	<tx:attributes>
+    		<!-- propagation用于在有两个事务交替执行时（一个方法调用另外一个方法）规定事务的处理规则；isolation用于并发执行条件下如何保证数据一致性 -->
+    		<tx:method name="ins*" propagation="REQUIRED" isolation="DEFAULT" rollback-for="java.lang.Exception"/>
+    	</tx:attributes>
+    </tx:advice>
+    <aop:config>
+    	<aop:pointcut expression="execution(* com.fudian.service.impl.*.*(..))" id="pointcut"/>
+    	<aop:advisor advice-ref="txAdvice" pointcut-ref="pointcut"/>
+    </aop:config>
+    
+    
+    
+    
+</beans>
